@@ -6,7 +6,7 @@ from stable_baselines3.common.monitor import Monitor # Monitorをインポート
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.wrappers import ActionMasker
 
-from card_game_env import CardGameEnv # 作成した環境をインポート
+from card_game_env import CardGameEnv, get_action_masks # get_action_masksをインポート
 
 # 環境をMaskable PPO用にラップする関数
 def make_masked_env(env_id, rank, seed=0, log_dir=None): # log_dir を引数に追加
@@ -21,8 +21,8 @@ def make_masked_env(env_id, rank, seed=0, log_dir=None): # log_dir を引数に�
     def _init():
         # ここで CardGameEnv を直接インスタンス化
         env = CardGameEnv()
-        # ActionMaskerでラップ (先に適用)
-        env = ActionMasker(env, lambda env: env.action_masks())
+        # ActionMaskerでラップ (先に適用) - ラムダ関数ではなく通常関数を使用
+        env = ActionMasker(env, get_action_masks)
         # Monitorでラップ (ActionMaskerの外側をラップ)
         if log_dir:
             # プロセスごとにログファイルを作成
@@ -38,9 +38,9 @@ def make_masked_env(env_id, rank, seed=0, log_dir=None): # log_dir を引数に�
 if __name__ == "__main__":
     env_id = "CardGameEnv-v0" # 任意のID (Gymnasiumに登録する場合は必要)
     num_cpu = 4  # 並列処理に使用するCPUコア数 (環境に合わせて調整)
-    total_timesteps = 1_000_000 # 総学習ステップ数 (調整可能)
-    log_dir = "./ppo_cardgame_logs/" # TensorBoardログの保存先
-    csv_log_dir = os.path.join(log_dir, "monitor_logs") # CSVログの保存先ディレクトリ
+    total_timesteps = 20_000_000 # 総学習ステップ数 (調整可能)
+    log_dir = "logs/ppo_cardgame/" # TensorBoardログの保存先 (変更)
+    csv_log_dir = os.path.join(log_dir, "monitor_logs") # CSVログの保存先ディレクトリ (変更)
     model_save_path = "./ppo_cardgame_model" # モデルの保存先
 
     # CSVログ用ディレクトリを作成
@@ -66,8 +66,8 @@ if __name__ == "__main__":
         gamma=0.99,         # 割引率 (調整可能)
         gae_lambda=0.95,    # GAEラムダ (調整可能)
         clip_range=0.2,     # PPOクリップ範囲 (調整可能)
-        ent_coef=0.0,       # エントロピー係数 (調整可能)
-        vf_coef=0.5,        # Value function係数 (調整可能)
+        ent_coef=0.01,      # エントロピー係数 (調整): 0.0 -> 0.01 (探索促進)
+        vf_coef=0.6,        # Value function係数 (調整): 0.5 -> 0.6 (価値関数学習強化)
         max_grad_norm=0.5,  # 勾配クリッピング (調整可能)
         device="auto"       # 自動でデバイス選択 (CPU or GPU)
     )
