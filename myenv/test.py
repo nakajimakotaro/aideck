@@ -49,7 +49,7 @@ def main(model_path: str, num_episodes: int = 5, render: bool = True):
         print(f"\n--- Episode {episode + 1} ---")
         if render:
             env.render()
-            time.sleep(0.5) # 少し待機して表示を見やすくする
+            #time.sleep(0.5) # 少し待機して表示を見やすくする
 
         while not terminated and not truncated:
             # 現在の観測と有効なアクションマスクを取得
@@ -68,7 +68,7 @@ def main(model_path: str, num_episodes: int = 5, render: bool = True):
 
             if render:
                 env.render()
-                time.sleep(0.5) # ステップ間の待機
+                # time.sleep(0.5) # ステップ間の待機
 
             # スコアは info から取得するのが確実 (報酬はステップ毎の学習用信号)
             episode_score = info.get('score', 0) # reset時に0に戻るので最終値を取得

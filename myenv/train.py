@@ -1,13 +1,15 @@
 import gymnasium as gym
+import os # osモジュールをインポート
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import SubprocVecEnv # For multiprocessing
+from stable_baselines3.common.monitor import Monitor # Monitorをインポート
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.wrappers import ActionMasker
 
 from card_game_env import CardGameEnv # 作成した環境をインポート
 
 # 環境をMaskable PPO用にラップする関数
-def make_masked_env(env_id, rank, seed=0):
+def make_masked_env(env_id, rank, seed=0, log_dir=None): # log_dir を引数に追加
     """
     Utility function for multiprocessed env.
 
@@ -19,9 +21,16 @@ def make_masked_env(env_id, rank, seed=0):
     def _init():
         # ここで CardGameEnv を直接インスタンス化
         env = CardGameEnv()
-        # ActionMaskerでラップ
+        # ActionMaskerでラップ (先に適用)
         env = ActionMasker(env, lambda env: env.action_masks())
+        # Monitorでラップ (ActionMaskerの外側をラップ)
+        if log_dir:
+            # プロセスごとにログファイルを作成
+            monitor_path = os.path.join(log_dir, f"monitor_{rank}") # ファイル名を指定 (拡張子 .csv は Monitor が自動で付与)
+            env = Monitor(env, monitor_path)
         # シードを設定 (重要: 各プロセスで異なるシード)
+        # Monitorがラップしている場合でも、元の環境のresetを呼び出す必要がある場合がある
+        # Monitorはresetをオーバーライドしているが、seed引数を内部のenvに渡す
         env.reset(seed=seed + rank)
         return env
     return _init
@@ -30,13 +39,17 @@ if __name__ == "__main__":
     env_id = "CardGameEnv-v0" # 任意のID (Gymnasiumに登録する場合は必要)
     num_cpu = 4  # 並列処理に使用するCPUコア数 (環境に合わせて調整)
     total_timesteps = 1_000_000 # 総学習ステップ数 (調整可能)
-    log_dir = "./ppo_cardgame_logs/" # ログの保存先
+    log_dir = "./ppo_cardgame_logs/" # TensorBoardログの保存先
+    csv_log_dir = os.path.join(log_dir, "monitor_logs") # CSVログの保存先ディレクトリ
     model_save_path = "./ppo_cardgame_model" # モデルの保存先
+
+    # CSVログ用ディレクトリを作成
+    os.makedirs(csv_log_dir, exist_ok=True)
 
     print("Creating vectorized environment...")
     # SubprocVecEnv を使用してマルチプロセスで環境を実行
-    # make_masked_env 関数を渡す
-    vec_env = SubprocVecEnv([make_masked_env(env_id, i) for i in range(num_cpu)])
+    # make_masked_env 関数に csv_log_dir を渡す
+    vec_env = SubprocVecEnv([make_masked_env(env_id, i, log_dir=csv_log_dir) for i in range(num_cpu)])
 
     print("Initializing MaskablePPO model...")
     # MaskablePPOモデルの初期化

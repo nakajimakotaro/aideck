@@ -31,7 +31,6 @@ class CardGameEnv(gym.Env):
         self.hand: List[int] = []
         self.next_card: Optional[int] = None
         self.stack: List[int] = []
-        self.score: int = 0
         self.current_turn: int = 0
         self.max_turns: int = 20
         self.merges_this_turn: int = 0
@@ -79,7 +78,6 @@ class CardGameEnv(gym.Env):
 
         self._deal_initial_cards()
         self.stack = []
-        self.score = 0
         self.current_turn = 1
         self.merges_this_turn = 0
 
@@ -107,7 +105,6 @@ class CardGameEnv(gym.Env):
     def _get_info(self) -> Dict[str, Any]:
         """追加情報を取得する"""
         return {
-            "score": self.score,
             "current_turn": self.current_turn,
             "merges_this_turn": self.merges_this_turn,
             "stack_size": len(self.stack),
@@ -118,12 +115,6 @@ class CardGameEnv(gym.Env):
         if not self.stack: # スタックが空なら何でも置ける
             return True
         return card_to_play > self.stack[-1]
-
-    def _check_score(self):
-        """スタックが1-5の順になっているかチェックし、スコアを加算"""
-        if self.stack == list(range(1, 6)):
-            self.score += 1
-            self.stack = []
 
     def step(self, action: int) -> Tuple[Dict[str, Any], float, bool, bool, Dict[str, Any]]:
         """行動を実行し、環境を次の状態に進める"""
@@ -151,8 +142,21 @@ class CardGameEnv(gym.Env):
                     while len(self.hand) < 4:
                         self.hand.append(0)
 
-                    # スコアチェック
-                    self._check_score()
+                    # スタック枚数に応じたリワード計算
+                    stack_len = len(self.stack)
+                    if stack_len == 1:
+                        reward = 0.0
+                    elif stack_len == 2:
+                        reward = 1.0
+                    elif stack_len == 3:
+                        reward = 3.0
+                    elif stack_len == 4:
+                        reward = 10.0
+                    elif stack_len == 5:
+                        reward = 100.0
+                        self.stack = []
+                    else:
+                        reward = 0.0 # 念のため
                 else:
                     # 無効なプレイ (本来はマスクされるはずだが、念のため)
                     reward = -0.1 # ペナルティを与えるか？
@@ -226,10 +230,6 @@ class CardGameEnv(gym.Env):
         if self.render_mode == "human":
             self._render_frame()
 
-        # 最終ターン終了時に最終スコアを報酬とする設計も可能
-        # if terminated:
-        #     reward = float(self.score)
-
         return observation, reward, terminated, truncated, info
 
     def render(self):
@@ -240,7 +240,7 @@ class CardGameEnv(gym.Env):
     def _render_frame(self):
         """フレームを描画する内部メソッド"""
         print("-" * 20)
-        print(f"Turn: {self.current_turn}/{self.max_turns} | Score: {self.score}")
+        print(f"Turn: {self.current_turn}/{self.max_turns}")
         print(f"Hand: {self.hand} | Next: {self.next_card}")
         print(f"Stack: {self.stack} (Top: {self.stack[-1] if self.stack else 'Empty'})")
         print(f"Merges this turn: {self.merges_this_turn}/{self.max_merges_per_turn}")
