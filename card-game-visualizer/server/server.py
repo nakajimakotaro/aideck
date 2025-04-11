@@ -75,7 +75,7 @@ class GameServer:
         self.use_random_action = False  # デバッグ用：ランダムアクション選択モード
         
         # AIモデルの読み込み
-        model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../myenv/2ppo_cardgame_model.zip'))
+        model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../myenv/ppo_cardgame_model.zip'))
         print(f"Loading AI model from: {model_path}")
             
         # モデルの読み込みを試みる
