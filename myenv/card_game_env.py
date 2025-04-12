@@ -73,6 +73,7 @@ class CardGameEnv(gym.Env):
         self.current_turn: int = 0
         self.merges_this_turn: int = 0
         self.score: float = 0.0  # スコアを保持する変数を追加
+        self.fullchain_count: float = 0.0  # スコアを保持する変数を追加
 
         # --- 状態空間 ---
         # 手札 (0-5:カード) - 空の概念なし
@@ -198,6 +199,7 @@ class CardGameEnv(gym.Env):
             "hold_content": self.hold_slot, # ホールド内容も追加
             "score": self.score,  # スコア情報を追加
             "is_full_chain": is_full_chain,  # フルチェイン情報
+            "fullchain_count": self.fullchain_count,  # フルチェイン情報
             "stacked_zeros": stacked_zeros  # スタックされた0の数
         }
 
@@ -210,6 +212,7 @@ class CardGameEnv(gym.Env):
         self.current_turn = 1
         self.merges_this_turn = 0
         self.score = 0.0  # スコアをリセット
+        self.fullchain_count = 0
         
         # フルチェイン情報をリセット
         self._last_clear_is_full_chain = False
@@ -391,6 +394,7 @@ class CardGameEnv(gym.Env):
         is_full_chain = set(non_zero_stack) == set(range(1, MAX_CARD_VALUE + 1))
         if is_full_chain:
             reward = REWARD_FULL_CHAIN
+            self.fullchain_count += 1
 
         # 0カードによる報酬倍率
         if num_zeros > 0:

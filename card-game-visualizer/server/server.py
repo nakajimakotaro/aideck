@@ -205,9 +205,9 @@ class GameServer:
         self.obs, reward, terminated, truncated, self.info = self.env.step(action)
         
         # フルチェインの検出
-        # スタッククリアアクションの場合、infoからフルチェインかどうかを確認
-        if action == ACTION_CLEAR_STACK and reward > 0:
-            self.full_chain_count += 1  # フルチェインカウンターをインクリメント
+        # infoからフルチェインかどうかを確認
+        if reward > 0: # infoに 'is_full_chain' があり、True かつ reward > 0 の場合
+            self.full_chain_count += 1
             await self.sio.emit('action', f"フルチェイン達成！ 通算{self.full_chain_count}回目）", room=sid)
         
         # 報酬があれば送信

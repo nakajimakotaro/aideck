@@ -37,6 +37,7 @@ def main(model_path: str, num_episodes: int = 5, render: bool = True):
 
     total_scores = []
     total_steps = []
+    total_fullchain_count = []
 
     print(f"\nRunning {num_episodes} test episodes...")
     for episode in range(num_episodes):
@@ -72,10 +73,12 @@ def main(model_path: str, num_episodes: int = 5, render: bool = True):
 
             # スコアは info から取得するのが確実 (報酬はステップ毎の学習用信号)
             episode_score = info.get('score', 0) # reset時に0に戻るので最終値を取得
+            episode_fullchain_count = info.get('fullchain_count', 0) # reset時に0に戻るので最終値を取得
 
             if terminated or truncated:
                 print(f"Episode finished after {episode_steps} steps.")
                 print(f"Final Score for Episode {episode + 1}: {episode_score}")
+                total_fullchain_count.append(episode_fullchain_count)
                 total_scores.append(episode_score)
                 total_steps.append(episode_steps)
 
@@ -86,6 +89,8 @@ def main(model_path: str, num_episodes: int = 5, render: bool = True):
         print(f"Average Steps per episode: {np.mean(total_steps):.2f}")
         print(f"Max Score: {np.max(total_scores)}")
         print(f"Min Score: {np.min(total_scores)}")
+        print(f"Max FullChain: {np.max(total_fullchain_count)}")
+        print(f"Min FullChain: {np.min(total_fullchain_count)}")
     else:
         print("No episodes were completed.")
 
