@@ -69,7 +69,7 @@ if __name__ == "__main__":
         ent_coef=0.01,      # エントロピー係数 (調整): 0.0 -> 0.01 (探索促進)
         vf_coef=0.6,        # Value function係数 (調整): 0.5 -> 0.6 (価値関数学習強化)
         max_grad_norm=0.5,  # 勾配クリッピング (調整可能)
-        device="cuda"       # 自動でデバイス選択 (CPU or GPU)
+        device="auto"       # 自動でデバイス選択 (CPU or GPU)
     )
 
     print(f"Starting training for {total_timesteps} timesteps...")

@@ -1,4 +1,5 @@
-gymnasium
-numpy
-stable-baselines3[extra]
-sb3-contrib
+gymnasium==1.1.0
+numpy==2.2.0
+sb3-contrib==2.6.0
+stable-baselines3==2.6.0
+stable-baselines3[extra]==2.6.0
