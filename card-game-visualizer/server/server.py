@@ -168,6 +168,17 @@ def create_app():
     app = web.Application()
     app.router.add_post('/api/next_turn', next_turn)
     app.router.add_get('/api/reset', reset_game) # Resetエンドポイントを追加
+
+    # 静的ファイル配信: /public/配下
+    static_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../dist/'))
+    app.router.add_static('/', static_dir, show_index=True)
+
+    # ルートでindex.htmlを返す
+    async def index(request):
+        index_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../index.html'))
+        return web.FileResponse(index_path)
+    app.router.add_get('/', index)
+
     return app
 
 if __name__ == '__main__':
