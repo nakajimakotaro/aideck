@@ -1,17 +1,16 @@
 import { useState, useEffect } from 'react';
 import Card from './Card';
 
-// ゲーム状態の型定義
+// ゲーム状態の型定義 (myenv/card_game_env.py の状態に合わせる)
 export interface GameState {
   hand: number[];
-  hold: number; // 0: ホールドなし, 1: 0をホールド
-  next: number; // 0: 空, 1-6: カード (1が0カード、2が1カード...)
-  stack_top: number; // 0: 空, 1-6: カード
-  stacked_zeros: number;
-  remaining_turns: number;
-  remaining_merges: number;
-  current_stack?: number[]; // スタック全体（情報として提供される場合）
-  full_chain_count: number; // フルチェインの回数
+  hold: number; // -1: ホールドなし, 0: 0をホールド
+  next: number; // -1: 空, 0-5: カード
+  stack: number[]; // スタック全体
+  current_turn: number;
+  merges_this_turn: number;
+  score: number;
+  fullchain_count: number; // フルチェインの回数
 }
 
 // アニメーション状態の型定義
@@ -101,14 +100,10 @@ const GameBoard = ({ gameState, lastAction }: GameBoardProps) => {
     );
   }
 
-  // 内部表現から実際の値に変換
-  const holdCard = gameState.hold === 1 ? 0 : -1; // 1 -> 0をホールド, 0 -> ホールドなし
-  const nextCard = gameState.next === 0 ? -1 : gameState.next - 1; // 0 -> 空, 1-6 -> 0-5
-  const stackTop = gameState.stack_top === 0 ? -1 : gameState.stack_top - 1; // 0 -> 空, 1-6 -> 0-5
-
-  // スタックの再構築（完全なスタック情報がない場合）
-  const stack = gameState.current_stack || 
-    (stackTop >= 0 ? [stackTop] : []);
+  // 内部表現から実際の値に変換 (hold, next はそのまま使える)
+  const holdCard = gameState.hold;
+  const nextCard = gameState.next;
+  const stack = gameState.stack;
 
   return (
     <div className="game-board flex flex-col items-center justify-between h-full py-4">
@@ -117,15 +112,19 @@ const GameBoard = ({ gameState, lastAction }: GameBoardProps) => {
         <div className="stats shadow">
           <div className="stat">
             <div className="stat-title">ターン</div>
-            <div className="stat-value">{21 - gameState.remaining_turns}/20</div>
+            <div className="stat-value">{gameState.current_turn}/20</div>
           </div>
           <div className="stat">
-            <div className="stat-title">残り合成</div>
-            <div className="stat-value">{gameState.remaining_merges}</div>
+            <div className="stat-title">合成回数</div>
+            <div className="stat-value">{gameState.merges_this_turn}/2</div>
+          </div>
+          <div className="stat">
+            <div className="stat-title">スコア</div>
+            <div className="stat-value text-info">{gameState.score.toFixed(0)}</div>
           </div>
           <div className="stat">
             <div className="stat-title">フルチェイン</div>
-            <div className="stat-value text-success">{gameState.full_chain_count}回</div>
+            <div className="stat-value text-success">{gameState.fullchain_count}回</div>
           </div>
         </div>
       </div>

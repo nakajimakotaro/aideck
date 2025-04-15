@@ -1,255 +1,175 @@
-import asyncio
-import json
 import os
 import sys
-import time
+import json
 import random
 import numpy as np
-from typing import Dict, List, Any, Optional
-
-import socketio
 from aiohttp import web
 from sb3_contrib import MaskablePPO
-from sb3_contrib.common.wrappers import ActionMasker
 
 # myenvディレクトリをパスに追加
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../myenv')))
 
-# カードゲーム環境をインポート
 from card_game_env import (
-    CardGameEnv, 
-    ACTION_PLAY_HAND_OFFSET, 
-    ACTION_PLAY_HOLD, 
-    ACTION_MERGE_OFFSET, 
-    ACTION_HOLD_CARD_OFFSET, 
+    CardGameEnv,
+    ACTION_PLAY_HAND_OFFSET,
+    ACTION_PLAY_HOLD,
+    ACTION_MERGE_OFFSET,
+    ACTION_HOLD_CARD_OFFSET,
     ACTION_CLEAR_STACK
 )
 
-# アクションをテキスト説明に変換する関数
+# AIモデルのロード（グローバルで1回のみ）
+model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../myenv/ppo_cardgame_model.zip'))
+print(f"Loading AI model from: {model_path}")
+model = MaskablePPO.load(model_path)
+print("AI model loaded successfully")
+
 def action_to_description(action_id: int, env: CardGameEnv) -> str:
-    """アクションIDを人間が読める説明に変換する"""
     if ACTION_PLAY_HAND_OFFSET <= action_id < ACTION_PLAY_HOLD:
         hand_idx = action_id - ACTION_PLAY_HAND_OFFSET
         card = env.hand[hand_idx]
         return f"手札の{hand_idx+1}番目のカード({card})をプレイ"
-    
     elif action_id == ACTION_PLAY_HOLD:
         card = env.hold_slot
         return f"ホールド枠のカード({card})をプレイ"
-    
     elif ACTION_MERGE_OFFSET <= action_id < ACTION_HOLD_CARD_OFFSET:
         idx_pair = env._action_to_merge_pair.get(action_id)
         if idx_pair:
             idx1, idx2 = idx_pair
             card1, card2 = env.hand[idx1], env.hand[idx2]
             return f"手札の{idx1+1}番目({card1})と{idx2+1}番目({card2})のカードを合成"
-    
     elif ACTION_HOLD_CARD_OFFSET <= action_id < ACTION_CLEAR_STACK:
         hand_idx = action_id - ACTION_HOLD_CARD_OFFSET
         card = env.hand[hand_idx]
         return f"手札の{hand_idx+1}番目のカード({card})をホールド"
-    
     elif action_id == ACTION_CLEAR_STACK:
         return "スタックをクリア"
-    
     return f"不明なアクション: {action_id}"
 
-class GameServer:
-    def __init__(self):
-        # Socket.IOサーバーの設定
-        self.sio = socketio.AsyncServer(
-            async_mode='aiohttp',
-            cors_allowed_origins='*'
-        )
-        self.app = web.Application()
-        self.sio.attach(self.app)
-        
-        # ゲーム環境の初期化
-        self.env = CardGameEnv()
-        self.obs = None
-        self.info = None
-        self.running = False
-        self.auto_play = False
-        self.auto_play_speed = 1.5  # 自動プレイの速度（秒）
-        self.full_chain_count = 0  # フルチェインの回数を追跡
-        self.use_random_action = False  # デバッグ用：ランダムアクション選択モード
-        
-        # AIモデルの読み込み
-        model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../myenv/ppo_cardgame_model.zip'))
-        print(f"Loading AI model from: {model_path}")
-            
-        # モデルの読み込みを試みる
-        self.model = MaskablePPO.load(model_path)
-        print("AI model loaded successfully")
-        self.use_ai = True
-        
-        # イベントハンドラの設定
-        self.setup_event_handlers()
-    
-    def setup_event_handlers(self):
-        @self.sio.event
-        async def connect(sid, environ):
-            print(f"Client connected: {sid}")
-            # 接続時に現在の状態を送信
-            if self.obs is not None:
-                await self.send_game_state(sid)
-        
-        @self.sio.event
-        async def disconnect(sid):
-            print(f"Client disconnected: {sid}")
-        
-        @self.sio.event
-        async def command(sid, data):
-            print(f"Received command: {data}")
-            if data == 'start':
-                await self.start_game(sid)
-            elif data == 'reset':
-                await self.reset_game(sid)
-            elif data == 'next':
-                await self.next_turn(sid)
-            elif data.startswith('auto:'):
-                # auto:start または auto:stop
-                command = data.split(':')[1]
-                if command == 'start':
-                    self.auto_play = True
-                    await self.sio.emit('action', "自動プレイを開始しました", room=sid)
-                    if self.running:
-                        asyncio.create_task(self.auto_play_loop(sid))
-                elif command == 'stop':
-                    self.auto_play = False
-                    await self.sio.emit('action', "自動プレイを停止しました", room=sid)
-            elif data.startswith('speed:'):
-                # speed:1.0 のような形式
-                try:
-                    speed_value = float(data.split(':')[1])
-                    # 速度は0.1秒から3.0秒の範囲に制限
-                    self.auto_play_speed = max(0.1, min(3.0, speed_value))
-                    await self.sio.emit('action', f"自動プレイ速度を{self.auto_play_speed:.1f}秒に設定しました", room=sid)
-                except ValueError:
-                    await self.sio.emit('action', "無効な速度値です", room=sid)
-            elif data == 'random':
-                self.use_random_action = not self.use_random_action
-                await self.sio.emit('action', f"ランダムアクションモードを{'有効' if self.use_random_action else '無効'}にしました", room=sid)
-    
-    async def start_game(self, sid):
-        """ゲームを開始する"""
-        self.obs, self.info = self.env.reset()
-        self.running = True
-        self.full_chain_count = 0  # フルチェインカウントをリセット
-        await self.send_game_state(sid)
-        await self.sio.emit('action', "ゲームを開始しました", room=sid)
-        
-        if self.auto_play:
-            asyncio.create_task(self.auto_play_loop(sid))
-    
-    async def reset_game(self, sid):
-        """ゲームをリセットする"""
-        self.obs, self.info = self.env.reset()
-        self.running = True
-        self.full_chain_count = 0  # フルチェインカウントをリセット
-        await self.send_game_state(sid)
-        await self.sio.emit('action', "ゲームをリセットしました", room=sid)
-    
-    async def next_turn(self, sid):
-        """次のターンに進む（AIが行動を選択）"""
-        if not self.running:
-            await self.sio.emit('action', "ゲームが開始されていません", room=sid)
-            return
-        
-        await self.perform_ai_action(sid)
-    
-    async def auto_play_loop(self, sid):
-        """自動プレイループ"""
-        while self.auto_play and self.running:
-            await self.perform_ai_action(sid)
-            await asyncio.sleep(self.auto_play_speed)  # 設定された速度で遅延
-    
-    async def perform_ai_action(self, sid):
-        """AIが行動を選択して実行する"""
-        if not self.running:
-            return
-        
-        # 有効なアクションを取得
-        action_masks = self.env.action_masks()
-        valid_actions = [i for i, valid in enumerate(action_masks) if valid]
-        
-        if not valid_actions:
-            await self.sio.emit('action', "有効なアクションがありません", room=sid)
-            self.running = False
-            return
-        
-        # 現在の観測を取得
-        action_mask_array = np.array(action_masks)
-        
-        if self.use_random_action:
-            # デバッグモード：有効なアクションからランダムに選択
-            action = random.choice(valid_actions)
-            action_source = "ランダム"
-        else:
-            # AIモデルで行動を予測
-            action, _ = self.model.predict(
-                self.obs,
-                action_masks=action_mask_array,
-                deterministic=False  # 確率的な選択（探索あり）
-            )
-            action_source = "AI"
-        
-        # 整数型に変換
-        action = int(action)
-        
-        # 行動の説明を取得
-        action_desc = action_to_description(action, self.env)
-        await self.sio.emit('action', f"[{action_source}] {action_desc}", room=sid)
-        
-        # 行動を実行
-        self.obs, reward, terminated, truncated, self.info = self.env.step(action)
-        
-        # フルチェインの検出
-        # infoからフルチェインかどうかを確認
-        if reward > 0: # infoに 'is_full_chain' があり、True かつ reward > 0 の場合
-            self.full_chain_count += 1
-            await self.sio.emit('action', f"フルチェイン達成！ 通算{self.full_chain_count}回目）", room=sid)
-        
-        # 報酬があれば送信
-        if reward != 0:
-            await self.sio.emit('reward', reward, room=sid)
-        
-        # 更新された状態を送信
-        await self.send_game_state(sid)
-        
-        # ゲーム終了判定
-        if terminated or truncated:
-            self.running = False
-            await self.sio.emit('action', "ゲームが終了しました", room=sid)
-    
-    async def send_game_state(self, sid):
-        """現在のゲーム状態をクライアントに送信する"""
-        if self.obs is None:
-            return
-        
-        # 観測とinfoを組み合わせてゲーム状態を作成
-        game_state = {
-            'hand': self.obs['hand'].tolist(),
-            'hold': int(self.obs['hold']),
-            'next': int(self.obs['next']),
-            'stack_top': int(self.obs['stack_top']),
-            'stacked_zeros': int(self.obs['stacked_zeros']),
-            'remaining_turns': int(self.obs['remaining_turns']),
-            'remaining_merges': int(self.obs['remaining_merges']),
-            'full_chain_count': self.full_chain_count,  # フルチェインの回数を追加
+def set_env_state(env: CardGameEnv, obs: dict, info: dict):
+    # myenv/card_game_env.py の内部状態に合わせてセット
+    env.hand = list(obs['hand'])
+    env.hold_slot = obs['hold']
+    env.next_card = obs['next']
+    # stackはcurrent_stackを優先してセット
+    if 'current_stack' in obs:
+        env.stack = list(obs['current_stack'])
+    elif info and 'current_stack' in info:
+        env.stack = list(info['current_stack'])
+    else:
+        env.stack = []
+    # current_turn, merges_this_turn, score, fullchain_count もセット
+    if info:
+        if 'current_turn' in info:
+            env.current_turn = int(info['current_turn'])
+        if 'merges_this_turn' in info:
+            env.merges_this_turn = int(info['merges_this_turn'])
+        if 'score' in info:
+            env.score = float(info['score'])
+        if 'fullchain_count' in info:
+            env.fullchain_count = float(info['fullchain_count'])
+
+async def next_turn(request):
+    data = await request.json()
+    obs = data.get('obs')
+    info = data.get('info', {})
+    use_random = data.get('use_random', False)
+
+    if obs is None:
+        return web.json_response({'error': 'obs is required'}, status=400)
+
+    # 環境を生成し状態をセット
+    env = CardGameEnv()
+    set_env_state(env, obs, info)
+
+    # 有効なアクションを取得
+    action_masks = env.action_masks()
+    valid_actions = [i for i, valid in enumerate(action_masks) if valid]
+    if not valid_actions:
+        return web.json_response({'error': '有効なアクションがありません'}, status=400)
+
+    action_mask_array = np.array(action_masks)
+    if use_random:
+        action = random.choice(valid_actions)
+        action_source = "ランダム"
+    else:
+        # モデルが期待する観測値形式に変換
+        model_obs = {
+            "hand": np.array(env.hand, dtype=np.int64),
+            "hold": np.int64(0 if env.hold_slot == -1 else 1),
+            "next": np.int64(0 if env.next_card == -1 else env.next_card + 1),
+            "stack_top": np.int64(0 if not env.stack else env.stack[-1] + 1),
+            "stacked_zeros": np.int64(env.stack.count(0)),
+            "remaining_turns": np.int64(20 - env.current_turn + 1),
+            "remaining_merges": np.int64(2 - env.merges_this_turn)
         }
-        
-        # infoからスタック全体を追加（利用可能な場合）
-        if 'current_stack' in self.info:
-            game_state['current_stack'] = self.info['current_stack']
-        
-        await self.sio.emit('gameState', game_state, room=sid)
-    
-    def run(self, host='localhost', port=5000):
-        """サーバーを起動する"""
-        print(f"Starting server at http://{host}:{port}")
-        web.run_app(self.app, host=host, port=port)
+        action, _ = model.predict(
+            model_obs, # 変換後の観測値を渡す
+            action_masks=action_mask_array,
+            deterministic=False
+        )
+        action = int(action)
+        action_source = "AI"
+
+    action_desc = action_to_description(action, env)
+    # 行動を実行
+    _, reward, terminated, truncated, new_info = env.step(action) # new_obs は使わない
+
+    # レスポンス用に内部状態を整形
+    response_obs = {
+        'hand': [int(x) for x in env.hand],
+        'hold': int(env.hold_slot),
+        'next': int(env.next_card),
+        'stack': [int(x) for x in env.stack],
+        'current_turn': int(env.current_turn),
+        'merges_this_turn': int(env.merges_this_turn),
+        'score': float(env.score),
+        'fullchain_count': float(env.fullchain_count),
+    }
+
+    response = {
+        'obs': response_obs,
+        'info': new_info, # infoはそのまま返す
+        'action': int(action),
+        'action_desc': f"[{action_source}] {action_desc}",
+        'reward': float(reward), # rewardもfloatに変換
+        'terminated': terminated,
+        'truncated': truncated
+    }
+    return web.json_response(response)
+
+async def reset_game(request):
+    try:
+        env = CardGameEnv()
+        _, info = env.reset() # obs は使わない
+
+        # レスポンス用に内部状態を整形
+        response_obs = {
+            'hand': [int(x) for x in env.hand],
+            'hold': int(env.hold_slot),
+            'next': int(env.next_card),
+            'stack': [int(x) for x in env.stack],
+            'current_turn': int(env.current_turn),
+            'merges_this_turn': int(env.merges_this_turn),
+            'score': float(env.score),
+            'fullchain_count': float(env.fullchain_count),
+        }
+
+        response = {
+            'obs': response_obs,
+            'info': info # infoはそのまま返す
+        }
+        return web.json_response(response)
+    except Exception as e:
+        print("Error in reset_game:", e)
+        return web.json_response({'error': str(e)}, status=500)
+
+def create_app():
+    app = web.Application()
+    app.router.add_post('/api/next_turn', next_turn)
+    app.router.add_get('/api/reset', reset_game) # Resetエンドポイントを追加
+    return app
 
 if __name__ == '__main__':
-    server = GameServer()
-    server.run()
+    app = create_app()
+    web.run_app(app, host='localhost', port=5000)
